@@ -1,0 +1,66 @@
+name: Release Skills
+
+# Triggers:
+#   - Manual run via the Actions UI (workflow_dispatch).
+#   - Repository dispatch from the docs repo whenever its main branch updates.
+#     Configure a PAT in the docs repo and have its workflow POST
+#     {"event_type":"docs-updated","client_payload":{"sha":"..."}} to this repo.
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [docs-updated]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout skills repo
+        uses: actions/checkout@v4
+
+      - name: Checkout docs source
+        uses: actions/checkout@v4
+        with:
+          repository: SyncSpider-GmbH/b2bware-documentationai-wiki
+          ref: ${{ github.event.client_payload.sha || 'main' }}
+          path: docs-source
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compute version
+        id: ver
+        run: echo "VERSION=$(date -u +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Build skills
+        run: python3 scripts/build-public-skills.py --version "${{ steps.ver.outputs.VERSION }}"
+
+      - name: Rename zips to versionless names
+        run: |
+          cd dist/skills
+          for skill in datahub-core datahub-hubs datahub-storefront; do
+            mv "${skill}-${{ steps.ver.outputs.VERSION }}.zip" "${skill}.zip"
+          done
+          ls -la
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: skills-v${{ steps.ver.outputs.VERSION }}
+          name: skills-v${{ steps.ver.outputs.VERSION }}
+          body: |
+            Built from docs commit `${{ github.event.client_payload.sha || 'main HEAD' }}`.
+
+            Direct download links (always point at the latest release):
+            - https://github.com/SyncSpider-GmbH/datahub-skills/releases/latest/download/datahub-core.zip
+            - https://github.com/SyncSpider-GmbH/datahub-skills/releases/latest/download/datahub-hubs.zip
+            - https://github.com/SyncSpider-GmbH/datahub-skills/releases/latest/download/datahub-storefront.zip
+          make_latest: "true"
+          files: |
+            dist/skills/datahub-core.zip
+            dist/skills/datahub-hubs.zip
+            dist/skills/datahub-storefront.zip
